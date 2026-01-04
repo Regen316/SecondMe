@@ -1,0 +1,240 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// NextAuth.js required models
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// Core Application Models
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?   // For email/password auth
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts Account[]
+  sessions Session[]
+  projects Project[]
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  status      String   @default("active") // "active" | "archived"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teamMembers TeamMember[]
+  tasks       Task[]
+  sprints     Sprint[]
+  documents   Document[]
+  aiUsageLogs AIUsageLog[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model TeamMember {
+  id             String   @id @default(cuid())
+  projectId      String
+  canonicalName  String
+  nameVariations String[] // Array of name variations ["Sasha", "Oleksandra", "Alexandra"]
+  role           String   // "Backend Developer", "Frontend Developer", etc.
+  expertise      String[] // Array of expertise areas ["API", "Database", "AWS"]
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  project       Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignedTasks Task[]
+
+  @@index([projectId])
+  @@index([active])
+}
+
+model Task {
+  id          String  @id @default(cuid())
+  projectId   String
+  sprintId    String?
+  assigneeId  String?
+
+  // Core fields
+  title       String
+  description String  @db.Text
+  status      String  @default("need_review") // "need_review" | "backlog" | "to_do" | "in_progress" | "done"
+  category    String? // "frontend" | "backend" | "full_stack" | "qa" | "documentation"
+  priority    String? // "high" | "medium" | "low"
+  position    Int     @default(0) // For ordering within columns
+
+  // Acceptance criteria and subtasks
+  acceptanceCriteria String[]
+  subtasks           String[]
+  dependencies       String[] // Task IDs
+
+  // Source tracking
+  extractedFrom String? // Reference to source transcript/document
+  isDuplicate   Boolean @default(false)
+  duplicateOf   String? // Original task ID if this is a duplicate
+
+  // Timestamps
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  // Relationships
+  project  Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sprint   Sprint?     @relation(fields: [sprintId], references: [id], onDelete: SetNull)
+  assignee TeamMember? @relation(fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([sprintId])
+  @@index([assigneeId])
+  @@index([status])
+  @@index([category])
+}
+
+model Sprint {
+  id           String   @id @default(cuid())
+  projectId    String
+  sprintNumber Int
+  startDate    DateTime
+  endDate      DateTime
+  status       String   @default("planned") // "planned" | "active" | "completed"
+
+  goals      String[]
+  painPoints String[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks   Task[]
+
+  @@unique([projectId, sprintNumber])
+  @@index([projectId])
+  @@index([status])
+}
+
+model Document {
+  id            String   @id @default(cuid())
+  projectId     String
+  type          String   // "meeting_minutes" | "sprint_summary" | "status_update" | "technical_doc" | "requirements"
+  title         String
+  content       String   @db.Text // Markdown content
+  generatedFrom String?  // Reference to source (transcript ID, sprint ID, etc.)
+  templateUsed  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([type])
+}
+
+model AIUsageLog {
+  id           String   @id @default(cuid())
+  projectId    String
+  feature      String   // "task_extraction" | "duplicate_detection" | "documentation" | "team_assignment"
+  model        String   // "claude-sonnet-4", "gpt-4", etc.
+  inputTokens  Int
+  outputTokens Int
+  costUsd      Decimal  @db.Decimal(10, 6)
+  timestamp    DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([timestamp])
+  @@index([feature])
+}
+
+// Deployment Checklist for QA (IDW specific)
+model DeploymentChecklist {
+  id          String   @id @default(cuid())
+  projectId   String
+  featureName String
+  taskIds     String[] // Related task IDs
+
+  // Environment deployment status
+  devDeployed     Boolean   @default(false)
+  devDeployedAt   DateTime?
+  devDeployedBy   String?
+
+  stagingDeployed   Boolean   @default(false)
+  stagingDeployedAt DateTime?
+  stagingDeployedBy String?
+
+  prodDeployed    Boolean   @default(false)
+  prodDeployedAt  DateTime?
+  prodDeployedBy  String?
+
+  notes     String? @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+}
+
+// Transcript/Input storage for reference
+model Transcript {
+  id        String   @id @default(cuid())
+  projectId String
+  title     String
+  content   String   @db.Text
+  type      String   // "meeting" | "slack" | "document" | "image_ocr"
+  sourceUrl String?
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+  @@index([type])
+}

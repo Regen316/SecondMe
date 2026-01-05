@@ -1,10 +1,12 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
+import { useIngestStore } from '@/stores/ingest-store'
 import {
   Upload,
   FileText,
@@ -12,20 +14,68 @@ import {
   MessageSquare,
   Sparkles,
   ArrowRight,
+  Loader2,
 } from 'lucide-react'
 
 type IngestMode = 'paste' | 'upload' | 'screenshot'
 
 export default function IngestPage() {
+  const router = useRouter()
   const [mode, setMode] = useState<IngestMode>('paste')
-  const [transcript, setTranscript] = useState('')
-  const [isProcessing, setIsProcessing] = useState(false)
+
+  const {
+    transcript,
+    setTranscript,
+    isProcessing,
+    setProcessing,
+    setError,
+    setExtractedTasks,
+    setUsage,
+    error,
+  } = useIngestStore()
 
   const handleProcess = async () => {
     if (!transcript.trim()) return
-    setIsProcessing(true)
-    // TODO: Implement AI processing
-    setTimeout(() => setIsProcessing(false), 2000)
+    setProcessing(true)
+    setError(null)
+
+    try {
+      // For now, use a demo project ID - in production, this would come from project selector
+      const projectId = 'demo-project'
+
+      const response = await fetch('/api/extract-tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transcript, projectId }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to extract tasks')
+      }
+
+      // Add IDs and selection state to tasks
+      const tasksWithMeta = data.tasks.map((task: Record<string, unknown>, index: number) => ({
+        ...task,
+        id: `task-${index}-${Date.now()}`,
+        selected: true,
+        isDuplicate: false,
+        duplicateOf: null,
+      }))
+
+      setExtractedTasks(tasksWithMeta)
+      if (data.usage) {
+        setUsage(data.usage)
+      }
+
+      // Navigate to review page
+      router.push('/ingest/review')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred')
+    } finally {
+      setProcessing(false)
+    }
   }
 
   return (
@@ -111,21 +161,31 @@ export default function IngestPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {error && (
+            <div className="rounded-md bg-red-50 p-3 text-sm text-red-600">
+              {error}
+            </div>
+          )}
+
           {mode === 'paste' && (
             <div className="space-y-2">
               <Label htmlFor="transcript">Meeting Transcript</Label>
               <Textarea
                 id="transcript"
-                placeholder="Paste your meeting transcript here...
+                placeholder={`Paste your meeting transcript here...
 
 Example:
-Sarah: We need to fix the login button alignment on mobile.
-Nick: I can take that. Also, the API rate limiting needs updating.
-Sarah: Great. Maria, can you write tests for the auth flow?
-Maria: Sure, I'll have them done by end of sprint."
+Sarah: We need to fix the login button alignment on mobile. It's really hard to tap.
+Nick: I can take that. Should be a quick CSS fix. Also, the API rate limiting needs updating - we're hitting limits during peak hours.
+Sarah: Good point. That's probably a backend change. Can you estimate that?
+Nick: I'd say medium priority. Maybe 2-3 hours of work.
+Sarah: Great. Maria, can you write tests for the auth flow once Nick's changes are in?
+Maria: Sure, I'll add it to my queue. Should have them done by end of sprint.
+Sarah: Perfect. One more thing - we need to document the new API endpoints before release.`}
                 className="min-h-[300px] font-mono text-sm"
                 value={transcript}
                 onChange={(e) => setTranscript(e.target.value)}
+                disabled={isProcessing}
               />
             </div>
           )}
@@ -161,7 +221,11 @@ Maria: Sure, I'll have them done by end of sprint."
           )}
 
           <div className="flex justify-end gap-3 pt-4">
-            <Button variant="outline" onClick={() => setTranscript('')}>
+            <Button
+              variant="outline"
+              onClick={() => setTranscript('')}
+              disabled={isProcessing}
+            >
               Clear
             </Button>
             <Button
@@ -169,7 +233,10 @@ Maria: Sure, I'll have them done by end of sprint."
               disabled={isProcessing || !transcript.trim()}
             >
               {isProcessing ? (
-                'Processing...'
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Extracting Tasks...
+                </>
               ) : (
                 <>
                   Extract Tasks

@@ -13,6 +13,7 @@ import {
   DollarSign,
   Settings,
   Zap,
+  Rocket,
 } from 'lucide-react'
 
 const navigation = [
@@ -22,6 +23,7 @@ const navigation = [
   { name: 'Sprints', href: '/sprints', icon: Calendar },
   { name: 'Team', href: '/team', icon: Users },
   { name: 'Documents', href: '/documents', icon: FileText },
+  { name: 'Deployments', href: '/deployments', icon: Rocket },
   { name: 'Costs', href: '/costs', icon: DollarSign },
 ]
 
